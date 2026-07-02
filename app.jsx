@@ -2,6 +2,10 @@ import { useState, useMemo } from "react";
 import * as XLSX from "xlsx";
 import { createRoot } from "react-dom/client";
 
+function smsTemplate(caseId, product, status, delivery) {
+  return "[무역알림] 고객님 안녕하세요.\n주문번호 " + caseId + " (" + product + ") 상태가 [" + status + "](으)로 업데이트되었습니다.\n예상 납기: " + (delivery || "미정") + "\n문의: 관리자 연락처";
+}
+
 
 // ============================================================
 // 数据结构 v3 — 按真实调查书/报价单流程重构
@@ -124,11 +128,7 @@ const T = {
     smsBtn: "📱 发送短信通知", smsSend: "发送", smsCancel: "取消",
     smsTitle: "短信通知预览", smsPhone: "客户手机号",
     smsSent: "✓ 短信已发送", smsPending: "※ 演示模式：实际发送需接入短信API（SENS/솔라피）",
-    smsTemplate: (caseId, customer, product, status, delivery) =>
-      `[무역알림] 고객님 안녕하세요.
-주문번호 ${caseId} (${product}) 상태가 [${status}](으)로 업데이트되었습니다.
-예상 납기: ${delivery || "미정"}
-문의: 관리자 연락처`,
+    smsTemplate: null,
     days: "天", overdue: "逾期",
     paymentStatus: "付款状态", logistics: "物流备注", customerNote: "客户备注",
     arrivalDate: "韩国到港日", customsClear: "通关状态", deliveryDate: "货物送达日",
@@ -205,11 +205,7 @@ const T = {
     smsBtn: "📱 SMS 알림 발송", smsSend: "발송", smsCancel: "취소",
     smsTitle: "SMS 미리보기", smsPhone: "고객 전화번호",
     smsSent: "✓ 발송 완료", smsPending: "※ 데모 모드: 실제 발송은 SMS API 연동 필요 (SENS / 솔라피)",
-    smsTemplate: (caseId, customer, product, status, delivery) =>
-      `[무역알림] 고객님 안녕하세요.
-주문번호 ${caseId} (${product}) 상태가 [${status}](으)로 업데이트되었습니다.
-예상 납기: ${delivery || "미정"}
-문의: 관리자 연락처`,
+    smsTemplate: null,
     days: "일", overdue: "기한 초과",
     paymentStatus: "결제 상태", logistics: "물류 비고", customerNote: "고객 비고",
     arrivalDate: "한국 입항일", customsClear: "통관 상태", deliveryDate: "배송 완료일",
