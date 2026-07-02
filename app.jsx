@@ -1,6 +1,108 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useCallback } from "react";
 import * as XLSX from "xlsx";
 import { createRoot } from "react-dom/client";
+
+// ============================================================
+// Supabase 데이터베이스 연결
+// ============================================================
+const SUPABASE_URL = "https://qsypfachsnntmbpzhemq.supabase.co";
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFzeXBmYWNoc25udG1icHpoZW1xIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI5NTkwODIsImV4cCI6MjA5ODUzNTA4Mn0.te6BjWskjwhxuX6ET_h43HaWYtYCAP0WpeuUYmp99eg";
+
+async function sbFetch(path, options = {}) {
+  const res = await fetch(SUPABASE_URL + path, {
+    ...options,
+    headers: {
+      "apikey": SUPABASE_KEY,
+      "Authorization": "Bearer " + SUPABASE_KEY,
+      "Content-Type": "application/json",
+      "Prefer": options.prefer || "",
+      ...(options.headers || {})
+    }
+  });
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(err);
+  }
+  const text = await res.text();
+  return text ? JSON.parse(text) : [];
+}
+
+// DB 읽기/쓰기 헬퍼
+const db = {
+  // 사용자
+  async getUsers() { return sbFetch("/rest/v1/users?select=*&order=created_at"); },
+  async upsertUser(u) { return sbFetch("/rest/v1/users", { method:"POST", prefer:"resolution=merge-duplicates", body: JSON.stringify(u) }); },
+  async deleteUser(id) { return sbFetch("/rest/v1/users?id=eq." + id, { method:"DELETE" }); },
+
+  // 견적
+  async getQuotes() { return sbFetch("/rest/v1/quote_cases?select=*&order=created_at.desc"); },
+  async upsertQuote(q) {
+    const row = {
+      id: q.id, customer: q.customer, contact: q.contact,
+      category: q.category, sales_rep: q.salesRep, purchase_rep: q.purchaseRep,
+      status: q.status, status_date: q.statusDate,
+      quote_date: q.quoteDate, quote_validity: q.quoteValidity,
+      estimated_delivery: q.estimatedDelivery,
+      inquiry_log: JSON.stringify(q.inquiryLog || []),
+      items: JSON.stringify(q.items || []),
+      updated_at: new Date().toISOString()
+    };
+    return sbFetch("/rest/v1/quote_cases", { method:"POST", prefer:"resolution=merge-duplicates", body: JSON.stringify(row) });
+  },
+  async deleteQuote(id) { return sbFetch("/rest/v1/quote_cases?id=eq." + id, { method:"DELETE" }); },
+
+  // 주문
+  async getOrders() { return sbFetch("/rest/v1/order_cases?select=*&order=created_at.desc"); },
+  async upsertOrder(o) {
+    const row = {
+      id: o.id, linked_quote: o.linkedQuote, customer: o.customer,
+      customer_phone: o.customerPhone, product: o.product, spec: o.spec, qty: o.qty,
+      purchase_currency: o.purchaseCurrency, purchase_amount: parseFloat(o.purchaseAmount)||0,
+      inland_fee: parseFloat(o.inlandFee)||0, locked_rate: parseFloat(o.lockedRate)||1,
+      sale_price: parseFloat(o.salePrice)||0, supplier: o.supplier,
+      sales_rep: o.salesRep, purchase_rep: o.purchaseRep, category: o.category,
+      status: o.status, payment_status: o.paymentStatus,
+      factory_delivery: o.factoryDelivery, est_ship_date: o.estShipDate,
+      warehouse_date: o.warehouseDate, loading_date: o.loadingDate,
+      ship_info: o.shipInfo, arrival_date: o.arrivalDate,
+      customs_clear: o.customsClear, delivery_date: o.deliveryDate,
+      logistics: o.logistics, customer_note: o.customerNote,
+      updated_at: new Date().toISOString()
+    };
+    return sbFetch("/rest/v1/order_cases", { method:"POST", prefer:"resolution=merge-duplicates", body: JSON.stringify(row) });
+  },
+  async deleteOrder(id) { return sbFetch("/rest/v1/order_cases?id=eq." + id, { method:"DELETE" }); },
+};
+
+// DB row → 앱 객체 변환
+function rowToQuote(r) {
+  return {
+    id: r.id, customer: r.customer, contact: r.contact,
+    category: r.category, salesRep: r.sales_rep, purchaseRep: r.purchase_rep,
+    status: r.status, statusDate: r.status_date,
+    quoteDate: r.quote_date, quoteValidity: r.quote_validity,
+    estimatedDelivery: r.estimated_delivery,
+    inquiryLog: typeof r.inquiry_log === 'string' ? JSON.parse(r.inquiry_log) : (r.inquiry_log || []),
+    items: typeof r.items === 'string' ? JSON.parse(r.items) : (r.items || []),
+  };
+}
+
+function rowToOrder(r) {
+  return {
+    id: r.id, linkedQuote: r.linked_quote, customer: r.customer,
+    customerPhone: r.customer_phone, product: r.product, spec: r.spec, qty: r.qty,
+    purchaseCurrency: r.purchase_currency, purchaseAmount: r.purchase_amount,
+    inlandFee: r.inland_fee, lockedRate: r.locked_rate,
+    salePrice: r.sale_price, supplier: r.supplier,
+    salesRep: r.sales_rep, purchaseRep: r.purchase_rep, category: r.category,
+    status: r.status, paymentStatus: r.payment_status,
+    factoryDelivery: r.factory_delivery, estShipDate: r.est_ship_date,
+    warehouseDate: r.warehouse_date, loadingDate: r.loading_date,
+    shipInfo: r.ship_info, arrivalDate: r.arrival_date,
+    customsClear: r.customs_clear, deliveryDate: r.delivery_date,
+    logistics: r.logistics, customerNote: r.customer_note,
+  };
+}
 
 function smsTemplate(caseId, product, status, delivery) {
   return "[무역알림] 고객님 안녕하세요.\n주문번호 " + caseId + " (" + product + ") 상태가 [" + status + "](으)로 업데이트되었습니다.\n예상 납기: " + (delivery || "미정") + "\n문의: 관리자 연락처";
@@ -1666,10 +1768,20 @@ function LoginScreen({ users, lang, setLang, onLogin }) {
     const id = idInput.trim();
     const pw = pwInput;
     if (!id || !pw) return;
-    const u = users.find(u => u.id.toLowerCase() === id.toLowerCase() || u.name === id);
-    if (!u) { setError(t.userNotFound); return; }
-    if (u.pw !== pw) { setError(t.wrongPw); return; }
-    onLogin(u);
+    // 먼저 로컬, 없으면 DB에서 확인
+    const localUser = users.find(u => u.id.toLowerCase() === id.toLowerCase() || u.name === id);
+    if (localUser) {
+      if (localUser.pw !== pw) { setError(t.wrongPw); return; }
+      onLogin(localUser);
+      return;
+    }
+    // DB에서 조회
+    db.getUsers().then(dbUsers => {
+      const u = dbUsers.find(u => u.id.toLowerCase() === id.toLowerCase() || u.name === id);
+      if (!u) { setError(t.userNotFound); return; }
+      if (u.pw !== pw) { setError(t.wrongPw); return; }
+      onLogin(u);
+    }).catch(() => setError(t.userNotFound));
   }
   const clearErr = () => setError("");
   return (
@@ -1748,16 +1860,26 @@ function StaffPage({ users, setUsers, currentUser, lang }) {
     const id = newUser.id.trim(), name = newUser.name.trim(), pw = newUser.pw.trim();
     if (!id || !name || !pw) return;
     if (users.some(u => u.id.toLowerCase() === id.toLowerCase())) { setAddError(t.staffExists); return; }
-    setUsers(us => [...us, { id, name, role: newUser.role, pw }]);
+    const newU = { id, name, role: newUser.role, pw };
+    setUsers(us => [...us, newU]);
+    db.upsertUser(newU).catch(e => console.error("직원 추가 오류:", e));
     setNewUser({ id: "", name: "", role: "sales", pw: "" });
     setAddError("");
   }
   function removeStaff(id) {
     if (id === currentUser.id) { alert(t.deleteSelf); return; }
-    if (confirm("삭제하시겠습니까? / 确定删除？")) setUsers(us => us.filter(u => u.id !== id));
+    if (confirm("삭제하시겠습니까? / 确定删除？")) {
+      setUsers(us => us.filter(u => u.id !== id));
+      db.deleteUser(id).catch(e => console.error("직원 삭제 오류:", e));
+    }
   }
   function changeRole(id, role) {
-    setUsers(us => us.map(u => u.id === id ? { ...u, role } : u));
+    setUsers(us => {
+      const updated = us.map(u => u.id === id ? { ...u, role } : u);
+      const found = updated.find(u => u.id === id);
+      if (found) db.upsertUser(found).catch(e => console.error("역할 변경 오류:", e));
+      return updated;
+    });
   }
   function openEdit(u) {
     setEditTarget(u);
@@ -1770,7 +1892,9 @@ function StaffPage({ users, setUsers, currentUser, lang }) {
     if (editPw && editPw !== editPwConfirm) {
       setEditError(lang === "zh" ? "两次密码不一致" : "비밀번호가 일치하지 않습니다"); return;
     }
-    setUsers(us => us.map(u => u.id !== editTarget.id ? u : { ...u, name, pw: editPw.trim() || u.pw }));
+    const updated = { ...editTarget, name, pw: editPw.trim() || editTarget.pw };
+    setUsers(us => us.map(u => u.id !== editTarget.id ? u : updated));
+    db.upsertUser(updated).catch(e => console.error("직원 수정 오류:", e));
     setEditTarget(null);
   }
 
@@ -1925,6 +2049,8 @@ export default function App() {
   const [orderModal, setOrderModal] = useState(null);
   const [exportModal, setExportModal] = useState(false);
   const [globalRates, setGlobalRates] = useState({ CNY: 190.5, USD: 1382.0 });
+  const [dbLoading, setDbLoading] = useState(false);
+  const [dbError, setDbError] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
   const [filterCustomer, setFilterCustomer] = useState("all");
   const [filterStaff, setFilterStaff] = useState("all");
@@ -1932,6 +2058,8 @@ export default function App() {
   const [searchTerm, setSearchTerm] = useState("");
   const t = T[lang];
   const perm = currentUser ? PERMISSIONS[currentUser.role] : null;
+
+
 
   const customers = useMemo(() => [...new Set([...quotes, ...orders].map(c => c.customer))], [quotes, orders]);
   const staff = useMemo(() => [...new Set([...quotes, ...orders].flatMap(c => [c.salesRep, c.purchaseRep]).filter(Boolean))], [quotes, orders]);
@@ -1948,16 +2076,33 @@ export default function App() {
 
   function saveQuote(form) {
     setQuotes(qs => qs.some(q => q.id === form.id) ? qs.map(q => q.id === form.id ? form : q) : [...qs, form]);
+    db.upsertQuote(form).catch(e => console.error("견적 저장 오류:", e));
     setQuoteModal(null);
   }
   function saveOrder(form) {
     setOrders(os => os.some(o => o.id === form.id) ? os.map(o => o.id === form.id ? form : o) : [...os, form]);
+    db.upsertOrder(form).catch(e => console.error("주문 저장 오류:", e));
     setOrderModal(null);
   }
-  function deleteQuote(id) { if (confirm("삭제하시겠습니까? / 确定删除？")) setQuotes(qs => qs.filter(q => q.id !== id)); }
-  function deleteOrder(id) { if (confirm("삭제하시겠습니까? / 确定删除？")) setOrders(os => os.filter(o => o.id !== id)); }
+  function deleteQuote(id) {
+    if (confirm("삭제하시겠습니까? / 确定删除？")) {
+      setQuotes(qs => qs.filter(q => q.id !== id));
+      db.deleteQuote(id).catch(e => console.error("견적 삭제 오류:", e));
+    }
+  }
+  function deleteOrder(id) {
+    if (confirm("삭제하시겠습니까? / 确定删除？")) {
+      setOrders(os => os.filter(o => o.id !== id));
+      db.deleteOrder(id).catch(e => console.error("주문 삭제 오류:", e));
+    }
+  }
   function quickStatus(id, status) {
-    setQuotes(qs => qs.map(q => q.id === id ? { ...q, status, statusDate: new Date().toISOString().slice(0,10) } : q));
+    setQuotes(qs => {
+      const updated = qs.map(q => q.id === id ? { ...q, status, statusDate: new Date().toISOString().slice(0,10) } : q);
+      const found = updated.find(q => q.id === id);
+      if (found) db.upsertQuote(found).catch(e => console.error("상태 저장 오류:", e));
+      return updated;
+    });
   }
 
   // 转下单：每个产品取「选定」的比价行，各生成一张下单案件
@@ -1983,8 +2128,28 @@ export default function App() {
       };
     });
     setOrders(os => [...os, ...newOrders]);
+    newOrders.forEach(o => db.upsertOrder(o).catch(e => console.error("전환 저장 오류:", e)));
     setPage("order");
   }
+
+  // DB에서 데이터 로드 (로그인 후)
+  useEffect(() => {
+    if (!currentUser) return;
+    setDbLoading(true);
+    Promise.all([
+      db.getQuotes().catch(() => []),
+      db.getOrders().catch(() => []),
+      db.getUsers().catch(() => []),
+    ]).then(([qs, os, us]) => {
+      if (qs.length > 0) setQuotes(qs.map(rowToQuote));
+      if (os.length > 0) setOrders(os.map(rowToOrder));
+      if (us.length > 0) setUsers(us);
+      setDbLoading(false);
+    }).catch(e => {
+      setDbError("DB 연결 오류: " + e.message);
+      setDbLoading(false);
+    });
+  }, [currentUser]);
 
   // 未登录 → 登录页
   if (!currentUser) {
@@ -2058,6 +2223,8 @@ export default function App() {
       <div style={{ flex: 1, padding: 28, overflowY: "auto", minWidth: 0 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 22 }}>
           <div>
+            {dbLoading && <div style={{ fontSize: 11, color: "#9ca3af", marginBottom: 4 }}>⏳ {lang === "zh" ? "数据加载中..." : "데이터 불러오는 중..."}</div>}
+            {dbError && <div style={{ fontSize: 11, color: "#dc2626", marginBottom: 4 }}>⚠️ {dbError}</div>}
             <h1 style={{ fontSize: 20, fontWeight: 700, margin: 0, color: "#0f172a" }}>
               {page === "dashboard" ? t.dashboard : page === "quote" ? t.quoteSystem : page === "order" ? t.orderSystem : t.staffMgmt}
             </h1>
@@ -2131,7 +2298,12 @@ export default function App() {
               <div key={o.id} style={{ breakInside: "avoid" }}>
                 <OrderCard o={o} lang={lang} perm={perm} user={currentUser}
                   onEdit={r => setOrderModal(r)} onDelete={deleteOrder}
-                  onAdvance={(id, st) => setOrders(os => os.map(x => x.id === id ? { ...x, status: st } : x))} />
+                  onAdvance={(id, st) => setOrders(os => {
+                    const updated = os.map(x => x.id === id ? { ...x, status: st } : x);
+                    const found = updated.find(x => x.id === id);
+                    if (found) db.upsertOrder(found).catch(e => console.error(e));
+                    return updated;
+                  })} />
               </div>
             ))}
           </div>
