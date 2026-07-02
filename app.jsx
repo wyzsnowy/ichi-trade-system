@@ -1924,6 +1924,7 @@ export default function App() {
   const [quoteModal, setQuoteModal] = useState(null);
   const [orderModal, setOrderModal] = useState(null);
   const [exportModal, setExportModal] = useState(false);
+  const [globalRates, setGlobalRates] = useState({ CNY: 190.5, USD: 1382.0 });
   const [filterStatus, setFilterStatus] = useState("all");
   const [filterCustomer, setFilterCustomer] = useState("all");
   const [filterStaff, setFilterStaff] = useState("all");
@@ -2015,10 +2016,22 @@ export default function App() {
           ))}
         </nav>
         <div style={{ padding: "12px 20px", borderTop: "1px solid rgba(255,255,255,0.08)" }}>
-          <div style={{ fontSize: 10, color: "#475569", marginBottom: 6 }}>📡 {t.rateHint} (CNY/USD → KRW)</div>
-          <div style={{ fontSize: 11, color: "#94a3b8", lineHeight: 1.8 }}>
-            CNY: <b style={{ color: "#e2e8f0" }}>{LIVE_RATES.CNY}</b> &nbsp; USD: <b style={{ color: "#e2e8f0" }}>{LIVE_RATES.USD}</b>
+          <div style={{ fontSize: 10, color: "#475569", marginBottom: 8 }}>
+            📡 {lang === "zh" ? "参考汇率 (管理员可修改)" : "참고 환율 (관리자 수정 가능)"} → KRW
           </div>
+          {["CNY","USD"].map(c => (
+            <div key={c} style={{ display:"flex", alignItems:"center", gap:6, marginBottom:6 }}>
+              <span style={{ fontSize:11, color:"#64748b", width:28 }}>{c}</span>
+              <input type="number" step="0.1"
+                value={globalRates[c]}
+                onChange={e => {
+                  const v = parseFloat(e.target.value) || 0;
+                  setGlobalRates(r => ({...r, [c]: v}));
+                  LIVE_RATES[c] = v;
+                }}
+                style={{ flex:1, padding:"3px 6px", borderRadius:5, border:"1px solid rgba(255,255,255,0.2)", background:"#1e293b", color:"#e2e8f0", fontSize:12, width:0 }} />
+            </div>
+          ))}
         </div>
         <div style={{ padding: "12px 20px", borderTop: "1px solid rgba(255,255,255,0.08)" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
